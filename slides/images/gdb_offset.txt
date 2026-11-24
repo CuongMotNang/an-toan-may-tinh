@@ -1,0 +1,19 @@
+Breakpoint 1 at 0x8049268: file stack.c, line 19.
+
+
+Breakpoint 1, bof (str=0xffffc7cc '\220' <repeats 188 times>, "\274\307\377\377\220\220\220\220\220\220\220\220"..., buffer_size=142) at stack.c:19
+19	    strcpy(buffer, str); // Lỗi tràn bộ nhớ xảy ra tại đây
+=== KET QUA GDB ===
+EBP          = 0xffffc738
+BUFFER       = 0xffffc680
+RETADDR_LOC  = 0xffffc73c
+OFFSET_DEC   = 188
+RET_SUGGEST  = 0xffffc716
+0xffffc680:	0xffffffff	0xf7d71e00	0xf7fbb400	0x676e6190
+0xffffc690:	0x69687420	0x74bfbae1	0xbae16c20	0x6b2070ad
+0xffffc738:	0xffffca08	0x080494e7	0xffffc7cc	0x0000008e
+A debugging session is active.
+
+	Inferior 1 [process 51375] will be killed.
+
+Quit anyway? (y or n) [answered Y; input not from terminal]

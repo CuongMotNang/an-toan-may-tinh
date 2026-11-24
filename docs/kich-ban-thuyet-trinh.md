@@ -23,7 +23,7 @@
 > "Để hiểu cách tấn công, ta xem khung ngăn xếp khi gọi hàm `bof`. Trên stack, từ địa chỉ thấp lên cao lần lượt là: mảng `buffer`, saved ebp, rồi đến **return address** — là địa chỉ CPU sẽ quay về sau khi hàm kết thúc. Quan trọng là `strcpy` ghi dữ liệu từ `buffer` đi lên phía địa chỉ cao, nên nếu dữ liệu đủ dài, nó sẽ đè lên return address. Đây chính là chỗ chúng em khai thác."
 
 ### Slide 6 — Lỗ hổng trong stack.c *(3:15–4:00)*
-> "Đây là hàm chứa lỗ hổng. `buffer` chỉ 100 đến 300 byte, nhưng `str` đọc tới 517 byte từ badfile, và `strcpy` không kiểm tra độ dài. Vì vậy nếu nhóm đặt đúng một địa chỉ vào vị trí return address, CPU sẽ nhảy tới nơi nhóm muốn khi hàm kết thúc."
+> "Đây là hàm chứa lỗ hổng. `buffer` chỉ 100 đến 199 byte, nhưng `str` đọc tới 512 byte từ badfile, và `strcpy` không kiểm tra độ dài. Vì vậy nếu nhóm đặt đúng một địa chỉ vào vị trí return address, CPU sẽ nhảy tới nơi nhóm muốn khi hàm kết thúc."
 
 ### Slide 7 — Cấu trúc badfile *(4:00–4:50)*
 > "Ý tưởng tấn công: badfile gồm một dãy NOP — các lệnh không làm gì — ở đầu, địa chỉ ghi đè ở vị trí return address, và shellcode đặt ở cuối. Nhóm cho return address trỏ vào giữa vùng NOP; CPU nhảy vào đó sẽ trượt qua các NOP cho tới khi gặp shellcode. Shellcode gồm `setuid(0)` để giữ quyền root, rồi `execve` gọi `/bin/sh`."
@@ -32,13 +32,13 @@
 > "Nhóm thực hiện trên máy ảo SEED Ubuntu 32-bit. Trước hết tắt ASLR để địa chỉ stack ổn định. Biên dịch với `-m32`, `-fno-stack-protector` để tắt stack canary, và `-z execstack` để cho phép thực thi mã trên stack. Cuối cùng `chown root` và `chmod 4755` để bật bit setuid, giúp chương trình chạy với quyền root." *(Nhấn mạnh: các cờ này khi bật lại chính là biện pháp phòng chống.)*
 
 ### Slide 9 — Bước 1: NƠI đặt return address *(5:45–7:00)*
-> "Bước một: xác định *nơi* đặt return address. Nhóm dùng gdb, đặt breakpoint tại hàm `bof`, chạy với mã sinh viên của nhóm. Khi dừng, nhóm in giá trị `$ebp` và địa chỉ `&buffer`. Return address nằm ngay trên saved ebp, tức tại `$ebp + 4`. Offset bằng `$ebp + 4` trừ đi địa chỉ buffer." *(Chỉ vào ảnh chụp gdb, đọc số liệu thực tế của nhóm.)*
+> "Bước một: xác định *nơi* đặt return address. Nhóm dùng gdb, dừng tại dòng `strcpy`, chạy với mã sinh viên của nhóm. Khi dừng, nhóm in giá trị `$ebp` và địa chỉ `buffer` (con trỏ alloca). Return address nằm ngay trên saved ebp, tức tại `$ebp + 4`. Offset bằng `$ebp + 4` trừ đi địa chỉ buffer." *(Chỉ vào ảnh chụp gdb, đọc số liệu thực tế của nhóm.)*
 
 ### Slide 10 — Bước 2: GIÁ TRỊ return address *(7:00–7:50)*
 > "Bước hai: xác định *giá trị* return address. Nhóm lấy địa chỉ `buffer` từ gdb, rồi cộng thêm một khoảng dư để trỏ vào giữa vùng NOP. Vì đã tắt ASLR nên địa chỉ trong gdb trùng với khi chạy thật." *(Chỉ vào ảnh và đọc con số cụ thể.)*
 
 ### Slide 11 — Bước 3: Chỉnh exploit.py *(7:50–8:40)*
-> "Bước ba: đưa hai giá trị `offset` và `ret` vừa tìm được vào `exploit.py`. Chương trình lấp đầy badfile bằng NOP, đặt shellcode ở cuối, và ghi địa chỉ `ret` dạng little-endian vào vị trí offset. Chạy `python3 exploit.py` để sinh badfile 517 byte."
+> "Bước ba: đưa hai giá trị `offset` và `ret` vừa tìm được vào `exploit.py`. Chương trình lấp đầy badfile bằng NOP, đặt shellcode ở cuối, và ghi địa chỉ `ret` dạng little-endian vào vị trí offset. Chạy `python3 exploit.py` để sinh badfile 512 byte."
 
 ### Slide 12 — Bước 4: Thực hiện tấn công *(8:40–9:20)*
 > "Bước bốn: chạy `./stack` với mã sinh viên. Dấu nhắc đổi thành dấu thăng, lệnh `id` cho `uid=0(root)` — tức nhóm đã có root shell. Dòng 'Returned Properly' không xuất hiện, chứng tỏ luồng thực thi đã bị chuyển hướng thành công."
