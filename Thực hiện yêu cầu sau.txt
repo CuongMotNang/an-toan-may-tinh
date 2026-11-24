@@ -1,0 +1,46 @@
+Thực hiện yêu cầu sau 3 sinh viên Lê Văn Cường mã sinh viên 23001842, Nguyễn Việt Anh 23001829, Nguyễn Mai Hoàng Anh 23001824
+-trả file slide báo cáo có code latex, chọn phông nhẹ, đơn giản để biên dịch được trên overleaf free
+-tạo thêm file giải thích các nội dung kiến thức, file kịch bản thuyết trình cho từng slide, file hướng dẫn thực hiện yêu cầu bên dưới
+-tự phân công công việc cho 3 thành viên 
+-Môn học Nhập môn An toàn máy tính, trường Đại học khoa học tự nhiên 
+-Các nội dung bám sát theo yêu cầu
+-nếu còn thấy thiếu nội dung gì thì báo lại 
+
+
+
+Yêu cầu thực hiện
+Cho file chương trình stack.c với một số thay đổi so với bài giảng như sau
+
+Địa chỉ và kích thước bộ đệm buffer không cố định mà thuộc 1 khoảng cho trước.
+
+Chương trình nhận tham số dòng lệnh là Mã sinh viên (chạy $./stack <MSV>) và dùng mã sinh viên làm mầm gieo ngẫu nhiên trong khoảng đã định.
+
+Hãy biên dịch chương trình stack.c thành chương trình có đặc quyền root và khai thác lỗ hổng buffer overflow để đạt được root shell.
+
+Nhiệm vụ của sinh viên là ghi lại video màn hình và thuyết minh toàn bộ quá trình tấn công, gồm các bước
+
+Cách xác định nơi đặt địa chỉ return address
+
+Cách xác định giá trị của địa chỉ return address
+
+Chỉnh sửa đối với chương trình exploit.py để tạo badfile
+
+Thực hiện tấn công chương trình stack.c
+
+Sinh viên cũng cần làm một file thuyết trình dạng powerpoint, cho 10 phút trình bày, mô tả lại
+
+Phân công công việc của các thành viên trong nhóm
+
+Trình bày lại các bước thực hiện kèm theo sơ đồ
+
+Cần có ảnh chụp màn hình debug (gdb) và cách tính toán vị trí địa chỉ return address cũng như giá trị của địa chỉ return address
+
+Video cần được upload lên youtube, đặt ở chế độ unlisted (không công khai). Sinh viên nộp file chương trình exploit.py, file thuyết trình và đường link video theo form nộp bài sẽ thông báo trên trang Classroom.
+
+Lưu ý: Sinh viên được sử dụng AI hỗ trợ quá trình thực hiện, song phải nêu rõ trong video và tài liệu thuyết trình những nội dung nào sử dụng AI và mức độ áp dụng. Các mức độ áp dụng được phân loại cần làm rõ gồm:
+
+Dùng AI để tranh luận và phản biện để tìm ra giải pháp, sau đó sinh viên tự triển khai.
+
+AI đóng vai trò đồng sáng tạo nội dung từng phần theo thiết kế của sinh viên, sinh viên biên tập lại, chỉnh sửa và chịu trách nhiệm nội dung. Cần làm rõ ý tưởng của sinh viên là gì, AI thực hiện những phần nào.
+
+AI tạo sinh thiết kế và triển khai theo yêu cầu prompt của sinh viên. Sinh viên đóng vai trò người viết prompt và ghép nối lại sản phẩm cuối.
