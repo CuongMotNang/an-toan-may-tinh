@@ -211,11 +211,20 @@ sudo chown root:root stack
 sudo chmod 4755 stack
 \end{lstlisting}
   \footnotesize
-  \begin{itemize}
-    \item \texttt{-fno-stack-protector}: tắt "canary" bảo vệ stack.
-    \item \texttt{-z execstack}: cho phép thực thi mã trên vùng stack.
-    \item \texttt{chmod 4755}: bật bit setuid $\Rightarrow$ chạy với quyền root.
-  \end{itemize}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \begin{itemize}
+        \item \texttt{-fno-stack-protector}: tắt "canary".
+        \item \texttt{-z execstack}: cho thực thi mã trên stack.
+        \item \texttt{chmod 4755}: bật bit setuid $\Rightarrow$ quyền root.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{images/compile_setuid.png}
+      \\ \footnotesize\textit{\texttt{-rwsr-xr-x root} = đã setuid-root}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 % ===================== SLIDE 9: BƯỚC 1 - NƠI RETURN ADDRESS =====================
@@ -273,9 +282,9 @@ p buffer     # 0xffffc680
     \end{column}
     \begin{column}{0.5\textwidth}
       \centering
-      \includegraphics[width=\linewidth]{images/gdb_offset.png}
+      \includegraphics[width=\linewidth]{images/ret_window.png}
       \\[0.15cm]
-      \footnotesize\textit{buffer = \texttt{0xffffc680} $\Rightarrow$ ret = \texttt{0xffffc7ac}}
+      \footnotesize\textit{Thực nghiệm: cả dải \texttt{[0xffffc7a0,0xffffc860]} đều ra root}
     \end{column}
   \end{columns}
 \end{frame}
@@ -293,7 +302,10 @@ content[start:] = shellcode                      # shellcode o cuoi
 content[offset:offset+4] = ret.to_bytes(4, 'little')  # ghi de return addr
 \end{lstlisting}
   \footnotesize
-  Chạy \texttt{python3 exploit.py} $\Rightarrow$ sinh ra \texttt{badfile} (512 byte).
+  Chạy \texttt{python3 exploit.py} $\Rightarrow$ sinh ra \texttt{badfile} (512 byte):
+  \begin{center}
+    \includegraphics[width=0.82\linewidth]{images/badfile_hex.png}
+  \end{center}
 \end{frame}
 
 % ===================== SLIDE 12: TẤN CÔNG =====================

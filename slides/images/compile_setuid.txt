@@ -1,0 +1,5 @@
+$ gcc -m32 -g -O0 -fno-stack-protector -z execstack -no-pie -o stack stack.c
+$ sudo chown root:root stack
+$ sudo chmod 4755 stack
+$ ls -l stack
+-rwsr-xr-x 1 root root 18436 Nov 24 20:29 stack
